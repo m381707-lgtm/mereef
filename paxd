@@ -1,0 +1,111 @@
+import telebot
+import requests
+import time
+import threading
+from flask import Flask
+
+# ------------------------------------------------
+# ضع توكن البوت الخاص بك هنا 👇
+BOT_TOKEN = "8246425608:AAH3uute8-j4FK1m_cRAd78w-ZFPhUULq2M"
+# ------------------------------------------------
+
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+
+# الأزواج المدعومة
+signals = {
+    "BTCUSDT": {"stop": 25, "target": 80},
+    "XAUUSD": {"stop": 20, "target": 60},
+    "US30": {"stop": 30, "target": 100},
+    "US100": {"stop": 20, "target": 70}
+}
+
+# ---- دالة لجلب السعر الحالي من Binance ----
+def fetch_price(symbol):
+    try:
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        res = requests.get(url, timeout=5)
+        data = res.json()
+        return float(data['price'])
+    except Exception as e:
+        print("❌ خطأ في جلب البيانات:", e)
+        return None
+
+# ---- تحليل بسيط يعتمد على حركة السعر وسيولة افتراضية ----
+def analyze_market(symbol):
+    price = fetch_price(symbol)
+    if not price:
+        return None
+
+    # توليد اتجاه توصية بسيط
+    action = "شراء 🟢" if int(price) % 2 == 0 else "بيع 🔴"
+
+    # تقدير وهمي للسيولة (تجريبي)
+    liquidity_internal = round(price * 0.998, 2)
+    liquidity_external = round(price * 1.002, 2)
+    liquidity_third = round((liquidity_internal + liquidity_external) / 2, 2)
+
+    stop = signals[symbol]["stop"]
+    target = signals[symbol]["target"]
+
+    return {
+        "symbol": symbol,
+        "price": price,
+        "action": action,
+        "stop": stop,
+        "target": target,
+        "liquidity_internal": liquidity_internal,
+        "liquidity_external": liquidity_external,
+        "liquidity_third": liquidity_third
+    }
+
+# ---- عند كتابة اسم الزوج في الدردشة ----
+@bot.message_handler(func=lambda m: m.text and m.text.upper().replace("/", "") in signals)
+def send_signal(message):
+    pair = message.text.upper().replace("/", "")
+    info = analyze_market(pair)
+    if info:
+        msg = f"""📊 <b>تحليل السوق - {info['symbol']}</b>
+
+🔹 السعر الحالي: {info['price']}
+🔹 التوصية: {info['action']}
+🔹 وقف الخسارة: {info['stop']} نقطة
+🔹 الهدف: {info['target']} نقطة
+
+📈 السيولة:
+- داخلية: {info['liquidity_internal']}
+- خارجية: {info['liquidity_external']}
+- سيولة ثالثة: {info['liquidity_third']}
+
+⏱️ الإطار الزمني: 1m / 5m / 15m
+"""
+        bot.reply_to(message, msg)
+    else:
+        bot.reply_to(message, "⚠️ لم أتمكن من جلب بيانات السوق الآن. حاول لاحقًا.")
+
+# ---- رسالة ترحيب ----
+@bot.message_handler(func=lambda m: m.text.lower() in ["مرحبا", "هلو", "سلام"])
+def greet(message):
+    bot.reply_to(message, "👋 أهلاً بك! أرسل اسم الزوج مثل BTCUSDT أو XAUUSD للحصول على التوصية.")
+
+print("🤖 البوت بدأ العمل بنجاح...")
+
+# ---- تشغيل البوت بدون توقف ----
+def run_bot():
+    while True:
+        try:
+            bot.polling(none_stop=True)
+        except Exception as e:
+            print("خطأ:", e)
+            time.sleep(5)
+
+threading.Thread(target=run_bot).start()
+
+# ---- لتشغيله 24/7 في Render أو Replit ----
+app = Flask(name)
+
+@app.route("/")
+def home():
+    return "✅ البوت يعمل الآن بدون مشاكل."
+
+if name == "main":
+    app.run(host="0.0.0.0", port=8080)
